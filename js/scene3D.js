@@ -375,14 +375,16 @@ const brass = sm(0xc9a45c, 0.28, 0.95);
 const woodTop = makeWoodTexture('#5a3822', '20,10,4', 0); woodTop.repeat.set(2, 1.3);
 
 /* büfe */
-scene.add(bm(48,0.8,32, new THREE.MeshStandardMaterial({ map: woodTop, roughness: 0.42 }), 0,-0.4,-3));
-scene.add(bm(46,7,29.6, sm(0x2b1b11,0.6,0.05), 0,-4.3,-3));
-{ const front = new THREE.Mesh(new THREE.PlaneGeometry(43,6.2), new THREE.MeshStandardMaterial({ map: makeSlatTexture(), roughness: 0.55 }));
+scene.add(bm(60,0.8,32, new THREE.MeshStandardMaterial({ map: woodTop, roughness: 0.42 }), 0,-0.4,-3));
+scene.add(bm(58,7,29.6, sm(0x2b1b11,0.6,0.05), 0,-4.3,-3));
+{ const st = makeSlatTexture(); st.repeat.set(55/43, 1);           // çıta sıklığı eskisi gibi kalsın
+  const front = new THREE.Mesh(new THREE.PlaneGeometry(55,6.2), new THREE.MeshStandardMaterial({ map: st, roughness: 0.55 }));
   front.position.set(0,-4.3,11.82); scene.add(front); }
-[[-21,-16],[21,-16],[-21,10],[21,10]].forEach(([x,z]) => {
+[[-27,-16],[27,-16],[-27,10],[27,10]].forEach(([x,z]) => {
   scene.add(cy(0.7,0.45,2.2,16,sm(0x1c120b,0.5,0.2),x,-8.9,z));
   scene.add(cy(0.47,0.47,0.25,16,brass,x,-9.9,z));
 });
+
 
 /* zemin */
 const floorTex = makeWoodTexture('#2c1a10', '0,0,0', 128); floorTex.repeat.set(10,10);
@@ -415,74 +417,130 @@ if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawNeon);
   neon.position.set(0,NEON_Y,-18.6); scene.add(neon);
   const nl = new THREE.PointLight(0xffa04d, 1.3, 34); nl.position.set(0,NEON_Y,-16.5); scene.add(nl); }
 
-/* hoparlörler: 15 hücreli multicell horn + woofer kabini */
-function hornCellGeo(mcx, mcy, mw, mh, tcx, tcy, tw, th, depth) {
-  /* ağızdan (z=0) boğaza (z=-depth) daralan açık dikdörtgen hücre */
-  const v = [
-    [mcx-mw/2, mcy-mh/2, 0], [mcx+mw/2, mcy-mh/2, 0], [mcx+mw/2, mcy+mh/2, 0], [mcx-mw/2, mcy+mh/2, 0],
-    [tcx-tw/2, tcy-th/2,-depth], [tcx+tw/2, tcy-th/2,-depth], [tcx+tw/2, tcy+th/2,-depth], [tcx-tw/2, tcy+th/2,-depth]
-  ];
-  const quads = [[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]];
-  const pos = [], idx = [];
-  quads.forEach((q,k) => { q.forEach(i => pos.push(...v[i])); const b = k*4; idx.push(b,b+1,b+2, b,b+2,b+3); });
+
+/* Korna: ağızdan (z=0) boğaza (z=-DEP) daralan, EĞRİ profilli 15 hücreli yelpaze.
+   Hücreler ortak çizgi ızgarasını paylaşır: komşu hücrelerin duvarı tek yüzeydir (boşluk yok, üst üste binme yok).
+   Dış hücrelerin duvarları kabuğu oluşturur, yani şekil yelpaze gibi açılır. */
+function makeHornGeo(HW, HH, DEP, NX, NY, tpx, tpy, S, K) {
+  const F  = t => (Math.exp(K*t) - 1) / (Math.exp(K) - 1);          // eğri profil
+  const mx = i => -HW/2 + i*HW/NX,  my = j => -HH/2 + j*HH/NY;      // ağızdaki ızgara çizgileri
+  const tx = i => (i - NX/2)*tpx,   ty = j => (j - NY/2)*tpy;       // boğazdaki ızgara çizgileri
+  const X = (i,t) => tx(i) + (mx(i) - tx(i))*F(t);
+  const Y = (j,t) => ty(j) + (my(j) - ty(j))*F(t);
+  const Z = t => -DEP + DEP*t;
+  const pos = [], col = [], idx = [];
+  const shade = t => 0.28 + 0.72*t;                                  // boğaza doğru kararır
+  const strip = (a, b) => {                                          // iki kenar eğrisi arasında şerit
+    const base = pos.length/3;
+    for (let s = 0; s <= S; s++) { const t = s/S, c = shade(t); pos.push(...a(t), ...b(t)); col.push(c,c,c, c,c,c); }
+    for (let s = 0; s < S; s++) { const k = base + s*2; idx.push(k,k+1,k+3, k,k+3,k+2); }
+  };
+  for (let i = 0; i <= NX; i++) for (let j = 0; j < NY; j++)         // dikey duvarlar
+    strip(t => [X(i,t),Y(j,t),Z(t)], t => [X(i,t),Y(j+1,t),Z(t)]);
+  for (let j = 0; j <= NY; j++) for (let i = 0; i < NX; i++)         // yatay duvarlar
+    strip(t => [X(i,t),Y(j,t),Z(t)], t => [X(i+1,t),Y(j,t),Z(t)]);
+  { const b = pos.length/3;                                          // boğaz kapağı
+    [[0,0],[NX,0],[NX,NY],[0,NY]].forEach(([i,j]) => { pos.push(tx(i), ty(j), -DEP); col.push(.2,.2,.2); });
+    idx.push(b,b+1,b+2, b,b+2,b+3); }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col,3));
   g.setIndex(idx); g.computeVertexNormals();
   return g;
 }
 
+/* hoparlör: kızıl-kahve kontrplak kabin + siyah woofer + yuvarlak port + 15 hücreli yelpaze korna
+   Kural: |x| + 4.3 * S_SCALE <= büfe yarı genişliği (30) */
+const spkWood = makeWoodTexture('#9a512c', '45,18,6', 0);
+
 function makeSpeaker(x, rotY) {
-  const S_SCALE = 1.2;      // hoparlör boyutu (1.0 = eski). Kural: |x| + 3.7 * S_SCALE <= 24 (büfe kenarı)
-  const HORN_LIFT = 1.2;    // kornanın kabinden yükselme miktarı
+  const S_SCALE = 1.5;                                          // hoparlör boyutu (1.0 = en eski)
   const g = new THREE.Group(); g.position.set(x,0,-8); g.rotation.y = rotY; g.scale.setScalar(S_SCALE);
-  const cabMat  = new THREE.MeshStandardMaterial({ map: woodTop, roughness: 0.42 });
-  const alu     = sm(0xb9b9b2, 0.3, 0.9);
+
+  const cabMat  = new THREE.MeshStandardMaterial({ map: spkWood, roughness: 0.5 });
+  const hornMat = new THREE.MeshStandardMaterial({ color: 0x9a4326, roughness: 0.6, metalness: 0.05,
+                    emissive: 0x1a0803, emissiveIntensity: 1, side: THREE.DoubleSide,
+                    vertexColors: THREE.VertexColors !== undefined ? THREE.VertexColors : true });
+  const black   = sm(0x0d0b0a, 0.75, 0.2);
+  const rubber  = sm(0x161210, 0.9, 0);
+  const coneMat = sm(0x141312, 0.65, 0.15);
+  const chrome  = sm(0xb9b9b4, 0.2, 0.95);
   const steel   = sm(0x1d1d1d, 0.5, 0.6);
-  const hornMat = new THREE.MeshStandardMaterial({ color: 0x77807a, roughness: 0.45, metalness: 0.65, side: THREE.DoubleSide });
+  const rotX = m => { m.rotation.x = Math.PI/2; return m; };    // silindiri öne bakacak şekilde yatır
 
   /* kabin */
-  g.add(bm(7.4,0.4,5.8,sm(0x120c08,0.5,0.3),0,0.2,0));
-  g.add(bm(7.0,7.5,5.4,cabMat,0,4.15,0));
-  g.add(bm(7.2,0.15,5.6,sm(0x1a110a,0.5,0.2),0,7.975,0));
-  g.add(bm(1.6,0.35,0.06,brass,0,0.95,2.72));                  // boş pirinç plaka (logo yok)
+  g.add(bm(7.4,0.4,5.8,sm(0x120c08,0.5,0.3),0,0.2,0));          // taban
+  g.add(bm(7.0,7.5,5.4,cabMat,0,4.15,0));                       // gövde
+  g.add(bm(7.2,0.15,5.6,sm(0x7a3e21,0.5,0.1),0,7.975,0));       // üst kapak
+  [-2.4,2.4].forEach(hx => g.add(bm(0.7,0.14,0.08,brass,hx,0.75,2.74)));   // pirinç menteşeler
 
-  /* 15" woofer */
-  const ringW  = cy(2.9,2.9,0.14,40,sm(0x1a1411,0.6,0.4),0,3.9,2.74); ringW.rotation.x = Math.PI/2; g.add(ringW);
-  const frameW = cy(2.6,2.6,0.16,40,alu,0,3.9,2.78);                  frameW.rotation.x = Math.PI/2; g.add(frameW);
-  const cone   = cy(2.35,0.9,0.6,40,sm(0x7b5a38,0.85,0),0,3.9,2.55);  cone.rotation.x = Math.PI/2; g.add(cone);
-  const dust   = sph(0.62,sm(0x2b211a,0.7,0.1),0,3.9,2.3);            dust.scale.z = 0.5; g.add(dust);
-
-  /* korna ölçüleri */
-  const HW = 6.4, HH = 4.6, DEP = 4.2, NX = 5, NY = 3, px = HW/NX, py = HH/NY;
-  const hornBaseY = 8.23 + HORN_LIFT;                           // kornanın alt kenarı
-  const hornG = new THREE.Group(); hornG.position.set(0, hornBaseY + HH/2, 2.9); g.add(hornG);
-
-  /* kornayı taşıyan ayak (ceviz blok + pirinç şerit) */
-  const pedH = hornBaseY - 0.18 - 8.05;
-  g.add(bm(3.8, pedH, 3.2, cabMat, 0, 8.05 + pedH/2, 1.0));
-  g.add(bm(4.0, 0.1, 3.4, brass, 0, 8.1, 1.0));
-
-  /* 15 hücre */
-  for (let i = 0; i < NX; i++) for (let j = 0; j < NY; j++) {
-    const cx = (i-(NX-1)/2)*px, cyy = (j-(NY-1)/2)*py;
-    const m = new THREE.Mesh(hornCellGeo(cx, cyy, px*0.97, py*0.97, cx*0.12, cyy*0.12, 0.24, 0.16, DEP), hornMat);
-    m.receiveShadow = true; hornG.add(m);
+  /* woofer (üstte) */
+  const WY = 5.35, FZ = 2.7;
+  g.add(rotX(cy(2.35,2.35,0.10,40,black,0,WY,FZ+0.05)));                    // montaj flanşı
+  g.add(rotX(cy(2.15,2.15,0.16,40,sm(0x1a1613,0.5,0.55),0,WY,FZ+0.10)));    // sepet
+  const sur = new THREE.Mesh(new THREE.TorusGeometry(1.80,0.15,12,48), rubber);
+  sur.position.set(0,WY,FZ+0.18); sur.castShadow = true; g.add(sur);        // kauçuk kenar
+  g.add(rotX(cy(1.78,0.55,0.75,40,coneMat,0,WY,FZ-0.28)));                  // koni
+  const dust = sph(0.6,sm(0x0a0908,0.5,0.3),0,WY,FZ-0.5); dust.scale.z = 0.5; g.add(dust);
+  for (let k = 0; k < 8; k++) {                                              // gümüş perçinler
+    const a = k*Math.PI/4 + Math.PI/8;
+    g.add(rotX(cy(0.10,0.10,0.12,10,chrome,Math.cos(a)*2.22,WY+Math.sin(a)*2.22,FZ+0.14)));
   }
-  /* ağız çerçevesi */
-  hornG.add(
-    bm(HW+0.5,0.18,0.3,alu,0, HH/2+0.09,0.05), bm(HW+0.5,0.18,0.3,alu,0,-HH/2-0.09,0.05),
-    bm(0.18,HH,0.3,alu,-HW/2-0.09,0,0.05),     bm(0.18,HH,0.3,alu, HW/2+0.09,0,0.05));
-  /* boğaz + sürücü */
-  hornG.add(bm(1.9,1.2,0.5,steel,0,0,-DEP-0.1));
-  const drv = cy(0.85,0.85,1.3,24,sm(0x111111,0.4,0.7),0,0,-DEP-0.9);  drv.rotation.x = Math.PI/2; hornG.add(drv);
-  const cap = cy(0.55,0.55,0.2,24,brass,0,0,-DEP-1.6);                  cap.rotation.x = Math.PI/2; hornG.add(cap);
-  /* sürücü braketi: kabinden sürücüye */
-  const brH = (hornBaseY + HH/2 - 0.85) - 8.05;
+
+  /* yuvarlak port (altta) */
+  const PY = 2.15;
+  g.add(rotX(cy(1.12,1.12,0.10,32,sm(0x1a1109,0.6,0.2),0,PY,FZ+0.03)));     // çerçeve
+  g.add(rotX(cy(0.98,0.98,0.12,32,sm(0x030201,1,0),0,PY,FZ+0.05)));         // delik
+
+  /* ═══ 15 hücreli yelpaze korna ═══ */
+  const HW = 7.0, HH = 4.9, DEP = 4.6, NX = 5, NY = 3;
+  const TPX = 0.30, TPY = 0.28;                                 // boğaz hücre boyu: küçüldükçe yelpaze açılır
+  const K = 1.2;                                                // eğrilik: 0.6 neredeyse düz, 2.0 çok belirgin
+  const HORN_LIFT = 0.6;                                          // > 0 yaparsan korna kabinden yükselir (ayak eklenir)
+  const hornBaseY = 8.21 + HORN_LIFT;
+  const hornG = new THREE.Group(); hornG.position.set(0, hornBaseY + HH/2, 2.85); g.add(hornG);
+  
+  if (HORN_LIFT > 0.01) {                                       // korna çıtası: ağzın altında, biraz içeride
+    const pedH = hornBaseY - 0.16 - 8.05;
+    g.add(bm(HW-1.0, pedH, 0.8, black, 0, 8.05 + pedH/2, 2.15));
+    g.add(bm(HW-1.0, 0.06, 0.04, brass, 0, 8.05 + pedH/2, 2.57));   // ince pirinç şerit
+  }
+
+
+  const horn = new THREE.Mesh(makeHornGeo(HW, HH, DEP, NX, NY, TPX, TPY, 16, K), hornMat);
+  horn.receiveShadow = true; hornG.add(horn);
+
+  /* ağız kenarları: septaların ağızdaki kalınlığı, duvar eğimine göre yatık */
+  const mx = i => -HW/2 + i*HW/NX,  my = j => -HH/2 + j*HH/NY;
+  const tx = i => (i - NX/2)*TPX,   ty = j => (j - NY/2)*TPY;
+  const Fp = K*Math.exp(K)/(Math.exp(K) - 1);                   // ağızdaki eğim çarpanı
+  const LIPD = 0.24, LIPW = 0.13;
+  for (let i = 1; i < NX; i++) {
+    const s = (mx(i) - tx(i))*Fp/DEP, n = Math.sqrt(1 + s*s);
+    const b = bm(LIPW, HH-0.12, LIPD, cabMat, mx(i) - s/n*LIPD/2, 0, -LIPD/(2*n));
+    b.rotation.y = Math.atan(s); hornG.add(b);
+  }
+  for (let j = 1; j < NY; j++) {
+    const s = (my(j) - ty(j))*Fp/DEP, n = Math.sqrt(1 + s*s);
+    const b = bm(HW-0.12, LIPW, LIPD, cabMat, 0, my(j) - s/n*LIPD/2, -LIPD/(2*n) - 0.012);
+    b.rotation.x = -Math.atan(s); hornG.add(b);
+  }
+  hornG.add(                                                    // dış çerçeve
+    bm(HW+0.3,0.16,0.3,cabMat,0, HH/2+0.08,0.05), bm(HW+0.3,0.16,0.3,cabMat,0,-HH/2-0.08,0.05),
+    bm(0.16,HH,0.3,cabMat,-HW/2-0.08,0,0.05),     bm(0.16,HH,0.3,cabMat, HW/2+0.08,0,0.05));
+
+  /* boğaz + sürücü (arkadan görünür) */
+  hornG.add(bm(1.7,1.1,0.5,steel,0,0,-DEP-0.25));
+  hornG.add(rotX(cy(0.85,0.85,1.3,24,sm(0x111111,0.4,0.7),0,0,-DEP-1.1)));
+  hornG.add(rotX(cy(0.55,0.55,0.2,24,brass,0,0,-DEP-1.85)));
+  const brH = (hornBaseY + HH/2 - 0.85) - 8.05;                              // sürücüyü taşıyan braket
   g.add(bm(1.2, brH, 1.2, steel, 0, 8.05 + brH/2, -1.9));
 
   scene.add(g);
 }
-makeSpeaker(-19.3, 0.25); makeSpeaker(19.3, -0.25);
+makeSpeaker(-22, 0.25); makeSpeaker(22, -0.25);
+
+
 
 /* ══════════════════════════════════════════════════════════════
    PLAK STANDI  (stand = navbar, her plak = bir sayfa)
